@@ -164,8 +164,6 @@ int main() {
 
             // second feature: find hashtags if any, and add to global hashgraph (function, addhashgraphifany, commented out because it crashes on some examples)
             // trim global_hashgraph first
-            
-
             addhashgraphifany(filteredtextarray, timestampstr);
             trimglobalhashgraph(timestampstr);
             calcrollingaverage(global_hashgraph, &rollavgstr);             
@@ -419,8 +417,8 @@ int addhashgraphifany(wchar_t *tweet, wchar_t *timestampstr) {
         return 0;
     } else if (count_to_hash<tweetlen) {
         
-        for (i=0, tmpptr=local_hashstr; i<max_local_hashstr_len; i++, tmpptr++) 
-                tmpptr=L'\0';
+        for (i=0; i<max_local_hashstr_len; i++) 
+                local_hashstr[i]=L'\0';
 
         // at least one hashtag found
         strptr=tweet+count_to_hash;
@@ -436,14 +434,15 @@ int addhashgraphifany(wchar_t *tweet, wchar_t *timestampstr) {
         //look for more hashes
         for (strptr = strptr+count_to_space; (count_to_hash = wcscspn(strptr, L"#")) < wcslen(strptr); strptr=strptr+count_to_space) {
             
-            for (i=0, tmpptr=local_hashstr; i<max_local_hashstr_len; i++, tmpptr++) 
-                tmpptr=L'\0';
+            for (i=0; i<max_local_hashstr_len; i++) 
+                local_hashstr[i]=L'\0';
                 
             strptr=strptr+count_to_hash;
             if (strptr[1] != L' ' && strptr[1] != L'#') {
                 swscanf(strptr, L"%ls", &local_hashstr);
                 count_to_space = wcscspn(strptr, L" ");
                 local_hashstr[count_to_space]=L'\0';
+                
                 
                 //create hashnode only if not a duplicate
                 
@@ -467,7 +466,7 @@ int addhashgraphifany(wchar_t *tweet, wchar_t *timestampstr) {
 //    wprintf(L"numhashnodes: %d ", numhashnodes);
 //    wprintf(L"Tweet has these hashtags/timestamps: ");
 //    for (i=0; i<numhashnodes; i++) {
-//        wprintf(L"%ls (%d/%d/%d %d:%d:%d)\n", local_hashnodelist[i]->text, (local_hashnodelist[i]->latesttimestamp)->month, (local_hashnodelist[i]->latesttimestamp)->dayofmonth, (local_hashnodelist[i]->latesttimestamp)->yr, (local_hashnodelist[i]->latesttimestamp)->hr, (local_hashnodelist[i]->latesttimestamp)->min, (local_hashnodelist[i]->latesttimestamp)->sec);
+//        wprintf(L"%ls (%d/%d/%d %d:%d:%d)\n", local_hashnodelist[i]->text, (local_hashnodelist[i]->latesttimestamp).month, (local_hashnodelist[i]->latesttimestamp).dayofmonth, (local_hashnodelist[i]->latesttimestamp).yr, (local_hashnodelist[i]->latesttimestamp).hr, (local_hashnodelist[i]->latesttimestamp).min, (local_hashnodelist[i]->latesttimestamp).sec);
 //   }    
     if (numhashnodes<2) {
         //done here, no need to add one hash tweets
@@ -555,6 +554,7 @@ int addhashgraphifany(wchar_t *tweet, wchar_t *timestampstr) {
             }    
         } // end of going through all of our new hashnodes and checking to see if they are on global hash graph
     }
+    printglobalhashgraph();
     return numglobaladds;
 }
 
@@ -574,8 +574,9 @@ int createhashnode(wchar_t *myhashstr, wchar_t *timestampstr, struct hashnode **
         }
         
         (*hashnoderesult) = malloc(sizeof(struct hashnode));
-        wcsncpy((*hashnoderesult)->text, myhashstr, wcslen(myhashstr));
+        wcscpy((*hashnoderesult)->text, myhashstr);
         convert_timestamp(timestampstr, &((*hashnoderesult)->latesttimestamp));
+
 }
 
 //debugging tool
@@ -605,7 +606,7 @@ int trimglobalhashgraph(wchar_t *timestampstr) {
     struct connected_hash *prevaptr = NULL, *curaptr, *nextaptr;
     struct timestamp_st curtimestamp;
     struct hashnode *tobedeleted_hashnodelist[80];
-    int i, numtobedeletednodes=0;
+    int i;
     
     convert_timestamp(timestampstr, &curtimestamp);
     
@@ -636,8 +637,6 @@ int trimglobalhashgraph(wchar_t *timestampstr) {
         }
         if (curgptr->associated_hashes == NULL) {
             //trim this hashgraph because there are no associated hashes
-            tobedeleted_hashnodelist[numtobedeletednodes] = curgptr->hash;
-            numtobedeletednodes++;
             if (prevgptr == NULL) {
                 global_hashgraph = nextgptr;
                 free(curgptr);
@@ -652,7 +651,6 @@ int trimglobalhashgraph(wchar_t *timestampstr) {
             curgptr = nextgptr;
         }
     }
-    for (i=0; i<numtobedeletednodes; i++) free(tobedeleted_hashnodelist[i]);
 }
 
 int calcrollingaverage(struct hashgraph *ghashgraph, char *avgstr) {
