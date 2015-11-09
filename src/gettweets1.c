@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <time.h>
+#include <math.h>
 
 extern int errno;
 
@@ -41,21 +42,24 @@ struct hashgraph {
 // global variable holding all hashgraph
 struct hashgraph *global_hashgraph;
 
-
+    
 int main() {
 
-    FILE *rfp, *wfp;
+    FILE *rfp, *wfp, *wfpcalc;
     struct stat st;
     wint_t wc;
     int nestlevel;
     wchar_t filteredtextarray[144];
+    int filteredtextarraylen;
     int unicode_count=0;
     wchar_t timestampstr[40];
     int numfieldsfilled=0;
+    char rollavgstr[10];
+
     
     filteredtextarray[0]=L'\0';
     timestampstr[0]=L'\0';
-
+ 
     // Open file for reading 
     if ((rfp = fopen("./tweet_input/tweets.txt", "r")) == NULL) {
         printf("Unable to open file");
@@ -78,6 +82,11 @@ int main() {
         printf("Unable to open file for writing");
         return;
     }
+
+    if ((wfpcalc = fopen("./tweet_output/ft2.txt", "w")) == NULL) {
+        printf("Unable to open file for writing");
+        return;
+    }
     
     // Loop through each line of the tweets.txt
     // instead of bringing entire json into memory, just look for the two fields, tweets and timestamps
@@ -85,7 +94,7 @@ int main() {
     while ((wc = fgetwc(rfp)) != WEOF) {
         
         int i;
-
+        
         //tweet text and timestamp handling
         if (nestlevel == 1 && wc == L'"') 
         {
@@ -113,7 +122,7 @@ int main() {
                          lastwc = wc;
                     } 
                     textarray[i]=L'\0';
-                    if (filteroutunicode(textarray, filteredtextarray)>0)
+                    if (filteroutunicode(textarray, filteredtextarray, filteredtextarraylen)>0)
                         unicode_count++;
                     
                     numfieldsfilled++;
@@ -144,7 +153,8 @@ int main() {
         
         
       if (numfieldsfilled == 2) {
-        
+
+
             // first feature: print into file
             fputws(filteredtextarray, wfp);
             fputws(L" (timestamp: ", wfp);
@@ -152,11 +162,16 @@ int main() {
             fputwc(L')', wfp);
             fputwc(L'\n', wfp);
 
-            // (incomplete) second feature: find hashtags if any, and add to global hashgraph (function, addhashgraphifany, commented out because it crashes on some examples)
-            // addhashgraphifany(filteredtextarray, timestampstr);
-                        
-            // trim global_hashgraph
+            // second feature: find hashtags if any, and add to global hashgraph (function, addhashgraphifany, commented out because it crashes on some examples)
+            // trim global_hashgraph first
+            
 
+            addhashgraphifany(filteredtextarray, timestampstr);
+            trimglobalhashgraph(timestampstr);
+            calcrollingaverage(global_hashgraph, &rollavgstr);             
+            fputs(rollavgstr, wfpcalc);
+            fputs("\n", wfpcalc);
+            
             // recalc rolling average
             
             // print to file
@@ -165,7 +180,7 @@ int main() {
             //got what we needed; fast forward to next line
             while ((wc=fgetwc(rfp)) != L'\n') {
                 if (wc == WEOF) {
-                    printunicodecount_closefps(unicode_count, wfp, rfp);
+                    printunicodecount_closefps(unicode_count, wfp, rfp, wfpcalc);
                     return;
                 };
             }
@@ -186,11 +201,11 @@ int main() {
             break;
     }
     
-    printunicodecount_closefps(unicode_count, wfp, rfp);
+    printunicodecount_closefps(unicode_count, wfp, rfp, wfpcalc);
 }
 
 // function main runs to gracefully exit and close up file pointers
-int printunicodecount_closefps(int unicode_count, FILE *wfp, FILE *rfp) {
+int printunicodecount_closefps(int unicode_count, FILE *wfp, FILE *rfp, FILE *wfpcalc) {
     wchar_t *unicode_countstr;
     struct hashgraph *tmphashgraphptr;
     struct connected_hash *tmpassociatedhashptr, *myptr;
@@ -202,10 +217,11 @@ int printunicodecount_closefps(int unicode_count, FILE *wfp, FILE *rfp) {
     fputws(L" tweets contained unicode", wfp);
     
     fclose(wfp);
+    fclose(wfpcalc);
     fclose(rfp);
     free(unicode_countstr);
     
-    printglobalhashgraph();
+    //printglobalhashgraph();
     tmphashgraphptr = global_hashgraph;
     while (tmphashgraphptr != NULL) {
         global_hashgraph=tmphashgraphptr->next;
@@ -222,7 +238,7 @@ int printunicodecount_closefps(int unicode_count, FILE *wfp, FILE *rfp) {
 }
 
 // main function to filter out unicode from input string and send to output string
-int filteroutunicode(wchar_t *inputstring, wchar_t *outputstring) {
+int filteroutunicode(wchar_t *inputstring, wchar_t *outputstring, int outputstringlen) {
  
  int i, j;
  wint_t wc;
@@ -238,6 +254,10 @@ int filteroutunicode(wchar_t *inputstring, wchar_t *outputstring) {
             i++;
         else if (wc == L'\"' || wc == L'\'' || wc == L'\\') {
             outputstring[j]=wc;
+            i=i+2;
+            j++;
+        } else if (wc == L'\n' || wc == '\t') {
+            outputstring[j] = ' ';
             i=i+2;
             j++;
         }
@@ -258,6 +278,7 @@ int filteroutunicode(wchar_t *inputstring, wchar_t *outputstring) {
     
  }
  outputstring[j]=L'\0';
+ while (j++ < outputstringlen) outputstring[j]=L'\0';
  return unicode_count;
 }
 
@@ -355,34 +376,40 @@ int diffmorethanmin(wchar_t *timestampstr1, wchar_t *timestampstr2) {
 
 // check to see timestamps differ by more than a minute; passing in timestampobjects as arguments rather than strings
 int timestampdiffmorethanmin(struct timestamp_st *compare1, struct timestamp_st *compare2) {
-    int mindiff=0, secdiff=0;
-    if (compare1->yr == compare2->yr && compare1->month == compare2->month && compare1->dayofmonth == compare2->dayofmonth && compare1->hr == compare2->hr) {
+    int mindiff, secdiff=0;
+    if ((compare1->yr == compare2->yr) && (compare1->month == compare2->month) && (compare1->dayofmonth == compare2->dayofmonth) && (compare1->hr == compare2->hr)) 
+    {
         mindiff = compare1->min - compare2->min;
+
         if (mindiff>1 || mindiff<-1) {
             // difference is definitely more than 1 minute
             return 1;
-        } else if (mindiff == 1 || mindiff == -1) {
+        }
+        if (mindiff == 1 || mindiff == -1) {
             if ((secdiff = (((compare2->min*60)+compare2->sec) - ((compare1->min*60)+compare1->sec))) > 60 || secdiff <-60) {
                 // more than 1 minute
                 return 1;
-            } else return 0;
-        } else if (mindiff == 0) {
+            } else {
+                return 0;
+            }
+        } 
+        if (mindiff == 0) {
             // difference is definitely less than 1 minute; it's seconds
             return 0;
         }
     }
     return 1;
 }
-
-// function to build hashgraph (not working)
+// function to build hashgraph
 int addhashgraphifany(wchar_t *tweet, wchar_t *timestampstr) {
-    wchar_t *strptr, local_hashstr[144];
+    wchar_t *strptr, local_hashstr[144], *tmpptr;
     int tweetlen=wcslen(tweet);
+    int max_local_hashstr_len=144;
     int count_to_hash=0, count_to_space=0;
     struct hashgraph *tmp_hashgraph=NULL, *globalhashgraphptr=NULL;
     struct hashnode *local_hashnode=NULL;
     struct hashnode *local_hashnodelist[80];
-    struct connected_hash *tmp_associated_hash=NULL, *local_associated_hashes=NULL;
+    struct connected_hash *tmp_associated_hash=NULL, *local_associated_hashes=NULL, *myassociatedptr=NULL;
     int numhashnodes=0;
     int i, j, k, foundassociatedmatch=0, foundglobalmatch=0, numglobaladds=0, founddup=0;
             
@@ -392,25 +419,32 @@ int addhashgraphifany(wchar_t *tweet, wchar_t *timestampstr) {
         return 0;
     } else if (count_to_hash<tweetlen) {
         
+        for (i=0, tmpptr=local_hashstr; i<max_local_hashstr_len; i++, tmpptr++) 
+                tmpptr=L'\0';
+
         // at least one hashtag found
         strptr=tweet+count_to_hash;
         if (strptr[1] != L' ' && strptr[1] !=L'#') {
             swscanf(strptr, L"%ls", &local_hashstr);
             count_to_space = wcscspn(strptr, L" ");
-            local_hashstr[count_to_space]=L'\0';
-        
+            
             createhashnode(local_hashstr, timestampstr, &local_hashnodelist[numhashnodes]);
             numhashnodes++;
+                    
         } else strptr=strptr+2;
-        
+
         //look for more hashes
         for (strptr = strptr+count_to_space; (count_to_hash = wcscspn(strptr, L"#")) < wcslen(strptr); strptr=strptr+count_to_space) {
             
+            for (i=0, tmpptr=local_hashstr; i<max_local_hashstr_len; i++, tmpptr++) 
+                tmpptr=L'\0';
+                
             strptr=strptr+count_to_hash;
             if (strptr[1] != L' ' && strptr[1] != L'#') {
                 swscanf(strptr, L"%ls", &local_hashstr);
                 count_to_space = wcscspn(strptr, L" ");
                 local_hashstr[count_to_space]=L'\0';
+                
                 //create hashnode only if not a duplicate
                 
                 for (i=0, founddup=0; i<numhashnodes; i++) {
@@ -420,6 +454,7 @@ int addhashgraphifany(wchar_t *tweet, wchar_t *timestampstr) {
                     }
                 }
                 if (founddup == 0) {
+                    
                     createhashnode(local_hashstr, timestampstr, &local_hashnodelist[numhashnodes]);
                     numhashnodes++;
                 }
@@ -462,18 +497,23 @@ int addhashgraphifany(wchar_t *tweet, wchar_t *timestampstr) {
                                 tmp_associated_hash->latesttimestamp = &local_hashnodelist[j]->latesttimestamp;
                                 tmp_associated_hash->next = NULL;
                                 // put it at the end of local_associated_hashes, which will then eventually go onto globalhaslgraphptr->associated_hashes
-                                if (local_associated_hashes == NULL) local_associated_hashes = tmp_associated_hash;
+                                if (local_associated_hashes == NULL) {
+                                    local_associated_hashes = tmp_associated_hash;
+                                }
                                 else {
-                                    // tack tmp_associated_hash to the front of local_associated_hashes
+                                    // tack tmp_associated_hash to the front of local_associated_hashes if it's not already on the list
                                     tmp_associated_hash->next = local_associated_hashes;
                                     local_associated_hashes = tmp_associated_hash;
+                                    
                                 }    
                             }    
                         } //end of searching through associated_hashes to see if there is a match
                     } //end of for loop for searching through associated hashes to see if there is a match
                     // almost done. remember to add local_associated_hashes to the end of current globalhashgraph->associated_hashes
-                    if (globalhashgraphptr->associated_hashes == NULL) globalhashgraphptr->associated_hashes = local_associated_hashes;
-                    else {
+                    if (globalhashgraphptr->associated_hashes == NULL) {
+                        globalhashgraphptr->associated_hashes = local_associated_hashes;
+                    }
+                    else if (local_associated_hashes != NULL) {
                         local_associated_hashes->next = globalhashgraphptr->associated_hashes;
                         globalhashgraphptr->associated_hashes = local_associated_hashes;
                         }
@@ -504,7 +544,9 @@ int addhashgraphifany(wchar_t *tweet, wchar_t *timestampstr) {
                     }
                 }
                 // now add tmp_hashgraph to global_hashgraph
-                if (global_hashgraph == NULL) global_hashgraph = tmp_hashgraph;
+                if (global_hashgraph == NULL) {
+                    global_hashgraph = tmp_hashgraph;
+                }
                 else {
                     tmp_hashgraph->next = global_hashgraph;
                     global_hashgraph = tmp_hashgraph;
@@ -522,9 +564,10 @@ int createhashnode(wchar_t *myhashstr, wchar_t *timestampstr, struct hashnode **
         struct hashnode *localhashnode;
 
         wint_t myhashstr_char;
+        wchar_t *myptr;
         int i=0;
         
-        while (myhashstr[i])  {
+        while (myhashstr[i] != L'\0')  {
             myhashstr_char = myhashstr[i];
             myhashstr[i]=towlower(myhashstr_char);
             i++;
@@ -539,6 +582,8 @@ int createhashnode(wchar_t *myhashstr, wchar_t *timestampstr, struct hashnode **
 int printglobalhashgraph() {
     struct hashgraph *globalhashgraphptr;
     struct connected_hash *tmpassociatedhashptr;
+    int count=0;
+    int sum=0;
 
     globalhashgraphptr=global_hashgraph;
     while (globalhashgraphptr != NULL) {
@@ -547,8 +592,94 @@ int printglobalhashgraph() {
         while (tmpassociatedhashptr != NULL) {
             wprintf(L" - %ls (%d/%d/%d %d:%d:%d)\n", tmpassociatedhashptr->hash->text, (tmpassociatedhashptr->hash->latesttimestamp).month, (tmpassociatedhashptr->hash->latesttimestamp).dayofmonth, (tmpassociatedhashptr->hash->latesttimestamp).yr, (tmpassociatedhashptr->hash->latesttimestamp).hr, (tmpassociatedhashptr->hash->latesttimestamp).min, (tmpassociatedhashptr->hash->latesttimestamp).sec);
             tmpassociatedhashptr = tmpassociatedhashptr->next;
+            sum++;
         }
         globalhashgraphptr=globalhashgraphptr->next;
+        count++;
     }
+    wprintf(L"Sum nodes: %d Sum hashgraphs: %d rolling average: %d", sum, count, (sum/count));
 }
 
+int trimglobalhashgraph(wchar_t *timestampstr) {
+    struct hashgraph *prevgptr = NULL, *curgptr, *nextgptr;
+    struct connected_hash *prevaptr = NULL, *curaptr, *nextaptr;
+    struct timestamp_st curtimestamp;
+    struct hashnode *tobedeleted_hashnodelist[80];
+    int i, numtobedeletednodes=0;
+    
+    convert_timestamp(timestampstr, &curtimestamp);
+    
+    if ((curgptr = global_hashgraph) == NULL) return;
+    
+    while (curgptr != NULL) {
+        nextgptr = curgptr->next;
+        if ((curaptr = curgptr->associated_hashes) != NULL) {
+            while (curaptr != NULL) {
+                nextaptr = curaptr->next;
+                if (timestampdiffmorethanmin(&curtimestamp, curaptr->latesttimestamp) == 1) {
+                    if (prevaptr == NULL) {
+                        curgptr->associated_hashes = nextaptr;
+                        free(curaptr);
+                        curaptr = nextaptr;
+                    }
+                    else {
+                        prevaptr->next = nextaptr;
+                        free(curaptr);
+                        curaptr = nextaptr;
+                    }
+                } else {
+                    // advance all of the pointers
+                    prevaptr = curaptr;
+                    curaptr = nextaptr;
+                }
+            }
+        }
+        if (curgptr->associated_hashes == NULL) {
+            //trim this hashgraph because there are no associated hashes
+            tobedeleted_hashnodelist[numtobedeletednodes] = curgptr->hash;
+            numtobedeletednodes++;
+            if (prevgptr == NULL) {
+                global_hashgraph = nextgptr;
+                free(curgptr);
+                curgptr = nextgptr;
+            } else {
+                prevgptr->next = nextgptr;
+                free(curgptr);
+                curgptr = nextgptr;
+            }
+        } else {
+            prevgptr = curgptr;
+            curgptr = nextgptr;
+        }
+    }
+    for (i=0; i<numtobedeletednodes; i++) free(tobedeleted_hashnodelist[i]);
+}
+
+int calcrollingaverage(struct hashgraph *ghashgraph, char *avgstr) {
+
+    struct hashgraph *gptr;
+    struct connected_hash *aptr;
+    int sum=0, count=0;
+    div_t result; 
+    
+    gptr = ghashgraph;
+    while (gptr != NULL) {
+        aptr = gptr->associated_hashes;
+        while (aptr != NULL) {
+            sum++;
+            aptr = aptr->next;
+        }
+        count++;
+        gptr=gptr->next;
+    }
+
+    if (count == 0 ) sprintf(avgstr, "0.00");
+    else {
+        result = div(sum, count);
+        if (result.rem == 0) sprintf(avgstr, "%d.00", result.quot);
+        else if (result.rem < 10) sprintf(avgstr, "%d.%d", result.quot, result.rem*10);  
+        else if (result.rem <100) sprintf(avgstr, "%d.%d", result.quot, result.rem);  
+        else if (result.rem <1000) sprintf(avgstr, "%d.%d", result.quot, (int) ((result.rem*10)+.5)/100);
+        else sprintf(avgstr, "%d.%d", result.quot, (int) ((result.rem*10)+.5)/1000);
+    }
+}
