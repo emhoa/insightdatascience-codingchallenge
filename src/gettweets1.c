@@ -554,7 +554,7 @@ int addhashgraphifany(wchar_t *tweet, wchar_t *timestampstr) {
             }    
         } // end of going through all of our new hashnodes and checking to see if they are on global hash graph
     }
-    printglobalhashgraph();
+    
     return numglobaladds;
 }
 
