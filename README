@@ -1,5 +1,5 @@
 This program fully implements the first feature of the coding challenge, namely to clean "tweets.txt" of Unicode and escape characters, outputing the result into tweet_output/ft1.txt
-Unfortunately, the second feature is not operational. I ran out of time and had a segmentation fault I was still debugging.
+The second feature also is operational on some datasets.
 
 Associated files
 ./src/gettweets1.c : Main code file
