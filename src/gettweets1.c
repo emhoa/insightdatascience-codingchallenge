@@ -61,7 +61,7 @@ int main() {
     timestampstr[0]=L'\0';
  
     // Open file for reading 
-    if ((rfp = fopen("./tweet_input/tweets.txt", "r")) == NULL) {
+    if ((rfp = fopen("./tweet_input/longtweets.txt", "r")) == NULL) {
         printf("Unable to open file");
         return;
     }
@@ -169,7 +169,7 @@ int main() {
             calcrollingaverage(global_hashgraph, &rollavgstr);             
             fputs(rollavgstr, wfpcalc);
             fputs("\n", wfpcalc);
-            
+            fflush(wfp);
             // recalc rolling average
             
             // print to file
@@ -207,9 +207,12 @@ int printunicodecount_closefps(int unicode_count, FILE *wfp, FILE *rfp, FILE *wf
     wchar_t *unicode_countstr;
     struct hashgraph *tmphashgraphptr;
     struct connected_hash *tmpassociatedhashptr, *myptr;
+    int minunicode_count = unicode_count;
     
-    unicode_countstr=malloc(sizeof(wchar_t)*unicode_count);
-    swprintf(unicode_countstr, unicode_count, L"%d", unicode_count);
+    if (unicode_count < 1) minunicode_count = 2;
+    
+    unicode_countstr=malloc(sizeof(wchar_t)*minunicode_count);
+    swprintf(unicode_countstr, minunicode_count, L"%d", unicode_count);
     fputwc(L'\n', wfp);
     fputws(unicode_countstr, wfp);
     fputws(L" tweets contained unicode", wfp);
@@ -658,7 +661,8 @@ int calcrollingaverage(struct hashgraph *ghashgraph, char *avgstr) {
     struct hashgraph *gptr;
     struct connected_hash *aptr;
     int sum=0, count=0;
-    div_t result; 
+    div_t result;
+    float floatval;
     
     gptr = ghashgraph;
     while (gptr != NULL) {
@@ -673,11 +677,7 @@ int calcrollingaverage(struct hashgraph *ghashgraph, char *avgstr) {
 
     if (count == 0 ) sprintf(avgstr, "0.00");
     else {
-        result = div(sum, count);
-        if (result.rem == 0) sprintf(avgstr, "%d.00", result.quot);
-        else if (result.rem < 10) sprintf(avgstr, "%d.%d", result.quot, result.rem*10);  
-        else if (result.rem <100) sprintf(avgstr, "%d.%d", result.quot, result.rem);  
-        else if (result.rem <1000) sprintf(avgstr, "%d.%d", result.quot, (int) ((result.rem*10)+.5)/100);
-        else sprintf(avgstr, "%d.%d", result.quot, (int) ((result.rem*10)+.5)/1000);
+        floatval = (float) sum / (float) count;
+        sprintf(avgstr, "%.2f", floatval);
     }
 }
